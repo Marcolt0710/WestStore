@@ -1,0 +1,6 @@
+{
+  "name": "West Store",
+  "description": "Loja de camisas de futebol nacionais e internacionais, com venda no varejo e atacado e entrega para todo o Brasil. Confira nosso catálogo de São Paulo, Flamengo, Corinthians e kits retrô.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
