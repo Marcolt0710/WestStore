@@ -21,20 +21,16 @@ const CATALOG_FILE = path.join(process.cwd(), "catalog.json");
 const CONFIG_FILE = path.join(process.cwd(), "site-config.json");
 const VIP_MEMBERS_FILE = path.join(process.cwd(), "vip-members.json");
 const COUPONS_FILE = path.join(process.cwd(), "coupons.json");
+const ORDERS_FILE = path.join(process.cwd(), "orders.json");
+const REVIEWS_FILE = path.join(process.cwd(), "reviews.json");
 
-const DEFAULT_VIP_MEMBERS = [
-  { name: "Marco Latapiat", date: "15/06/2026", status: "Ativo" },
-  { name: "Gabriel Souza", date: "14/06/2026", status: "Ativo" },
-  { name: "Amanda Oliveira", date: "13/06/2026", status: "Ativo" },
-  { name: "Bruno Mendes", date: "12/06/2026", status: "Ativo" }
-];
+const DEFAULT_VIP_MEMBERS: any[] = [];
 
-const DEFAULT_COUPONS = [
-  { code: "WEST10", discount: "10%", type: "Fixo", status: "Ativo" },
-  { code: "VIPWEST", discount: "15%", type: "VIP", status: "Ativo" },
-  { code: "FRETEGRATIS", discount: "R$ 20", type: "Frete", status: "Ativo" },
-  { code: "ATACADO5", discount: "5%", type: "Volume", status: "Ativo" }
-];
+const DEFAULT_COUPONS: any[] = [];
+
+const DEFAULT_REVIEWS: any[] = [];
+
+const DEFAULT_ORDERS: any[] = [];
 
 // Helper to get admin password from env or default
 function getServerAdminPassword(): string {
@@ -109,56 +105,124 @@ function mapToRow(jk: any) {
 
 // Ensure initial files exist with default data
 function initializeDatabase() {
-  // Initialize catalog.json if not exists
-  if (!fs.existsSync(CATALOG_FILE)) {
-    // Ensure default stock is injected
-    const initializedCatalog = JERSEY_CATALOG.map(item => ({
-      ...item,
-      stock: item.stock || { P: 10, M: 10, G: 10, GG: 10 }
-    }));
-    fs.writeFileSync(CATALOG_FILE, JSON.stringify(initializedCatalog, null, 2), "utf-8");
-    console.log("Initialized catalog.json with default data.");
-  } else {
-    // Ensure any existing catalog jerseys have stock objects defined
+  // If catalog.json exists and has mock products, or doesn't exist, we start empty
+  let isMockCatalogStatus = false;
+  if (fs.existsSync(CATALOG_FILE)) {
     try {
       const data = fs.readFileSync(CATALOG_FILE, "utf-8");
-      const current = JSON.parse(data);
-      let updated = false;
-      const verified = current.map((item: any) => {
-        if (!item.stock) {
-          updated = true;
-          return {
-            ...item,
-            stock: { P: 10, M: 10, G: 10, GG: 10 }
-          };
-        }
-        return item;
-      });
-      if (updated) {
-        fs.writeFileSync(CATALOG_FILE, JSON.stringify(verified, null, 2), "utf-8");
-        console.log("Migrated and verified stock in catalog.json");
+      if (data.includes("spfc-home-24-25") || data.includes("fla-home-25-26") || data.includes("cor-home-25-26")) {
+        isMockCatalogStatus = true;
       }
-    } catch (e) {
-      console.error("Error verifying catalog.json stock", e);
-    }
+    } catch {}
   }
 
-  // Initialize site-config.json if not exists
+  if (isMockCatalogStatus || !fs.existsSync(CATALOG_FILE)) {
+    fs.writeFileSync(CATALOG_FILE, "[]", "utf-8");
+    console.log("Initialized catalog.json as empty.");
+  }
+
+  // Ensure default site configuration exists
   if (!fs.existsSync(CONFIG_FILE)) {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(DEFAULT_SITE_CONFIG, null, 2), "utf-8");
     console.log("Initialized site-config.json with default config.");
+  } else {
+    // Force set the vipPrice to R$ 7.50 if it was loaded as 49.90 or anything else
+    try {
+      const configData = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+      if (configData.vipPrice === "49.90" || configData.vipPrice !== "7,50") {
+        configData.vipPrice = "7,50";
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(configData, null, 2), "utf-8");
+        console.log("Forced correction of vipPrice to 7,50 locally.");
+      }
+    } catch {}
   }
 
-  // Initialize vip-members.json if not exists
-  if (!fs.existsSync(VIP_MEMBERS_FILE)) {
-    fs.writeFileSync(VIP_MEMBERS_FILE, JSON.stringify(DEFAULT_VIP_MEMBERS, null, 2), "utf-8");
-    console.log("Initialized vip-members.json with default config.");
+  // Synchronize site-config with Supabase on startup to avoid stale DB entries overruling local settings
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const configData = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+      const row = {
+        id: "default",
+        hero_eyebrow: configData.heroEyebrow,
+        hero_title_1: configData.heroTitle1,
+        hero_title_accent: configData.heroTitleAccent,
+        hero_subtitle: configData.heroSubtitle,
+        whatsapp_number: configData.whatsappNumber,
+        instagram_handle: configData.instagramHandle,
+        vip_price: configData.vipPrice,
+        vip_benefits: configData.vipBenefits || []
+      };
+      
+      supabase
+        .from("site_config")
+        .upsert(row)
+        .then(({ error }: any) => {
+          if (error) console.error("Error seeding config setup to Supabase:", error.message);
+          else console.log("Successfully synchronized startup site-config.json to Supabase (VIP Price R$ 7,50).");
+        });
+    } catch (e: any) {
+      console.error("Failed startup site-config sync to Supabase:", e.message);
+    }
   }
 
-  // Initialize coupons.json if not exists
-  if (!fs.existsSync(COUPONS_FILE)) {
-    fs.writeFileSync(COUPONS_FILE, JSON.stringify(DEFAULT_COUPONS, null, 2), "utf-8");
-    console.log("Initialized coupons.json with default config.");
+  // Ensure we start without mock VIP members
+  let isMockVip = false;
+  if (fs.existsSync(VIP_MEMBERS_FILE)) {
+    try {
+      const data = fs.readFileSync(VIP_MEMBERS_FILE, "utf-8");
+      if (data.includes("Marco Latapiat") || data.includes("Gabriel Souza")) {
+        isMockVip = true;
+      }
+    } catch {}
+  }
+  if (isMockVip || !fs.existsSync(VIP_MEMBERS_FILE)) {
+    fs.writeFileSync(VIP_MEMBERS_FILE, "[]", "utf-8");
+    console.log("Initialized vip-members.json as empty.");
+  }
+
+  // Ensure we start without mock coupons
+  let isMockCoupons = false;
+  if (fs.existsSync(COUPONS_FILE)) {
+    try {
+      const data = fs.readFileSync(COUPONS_FILE, "utf-8");
+      if (data.includes("WEST10") || data.includes("VIPWEST")) {
+        isMockCoupons = true;
+      }
+    } catch {}
+  }
+  if (isMockCoupons || !fs.existsSync(COUPONS_FILE)) {
+    fs.writeFileSync(COUPONS_FILE, "[]", "utf-8");
+    console.log("Initialized coupons.json as empty.");
+  }
+
+  // Ensure we start without mock orders
+  let isMockOrders = false;
+  if (fs.existsSync(ORDERS_FILE)) {
+    try {
+      const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+      if (data.includes("WS-ORDER-101") || data.includes("Carlos Silva")) {
+        isMockOrders = true;
+      }
+    } catch {}
+  }
+  if (isMockOrders || !fs.existsSync(ORDERS_FILE)) {
+    fs.writeFileSync(ORDERS_FILE, "[]", "utf-8");
+    console.log("Initialized orders.json as empty.");
+  }
+
+  // Ensure we start without mock reviews
+  let isMockReviews = false;
+  if (fs.existsSync(REVIEWS_FILE)) {
+    try {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      if (data.includes("rev-spfc-001")) {
+        isMockReviews = true;
+      }
+    } catch {}
+  }
+  if (isMockReviews || !fs.existsSync(REVIEWS_FILE)) {
+    fs.writeFileSync(REVIEWS_FILE, "[]", "utf-8");
+    console.log("Initialized reviews.json as empty.");
   }
 }
 
@@ -604,6 +668,294 @@ app.post("/api/upload", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "Falha de upload no Supabase Storage", details: err.message });
+  }
+});
+
+// 8. ORDERS ENDPOINTS & ANALYTICS MANAGER
+app.get("/api/orders", (req, res) => {
+  try {
+    if (fs.existsSync(ORDERS_FILE)) {
+      const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+      return res.json(JSON.parse(data));
+    }
+    return res.json([]);
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao carregar pedidos", details: err.message });
+  }
+});
+
+app.post("/api/orders", (req, res) => {
+  try {
+    const order = req.body;
+    if (!order || !order.clientName || !order.items) {
+      return res.status(400).json({ error: "Dados do pedido incorretos" });
+    }
+    
+    let orders = [];
+    if (fs.existsSync(ORDERS_FILE)) {
+      const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+      orders = JSON.parse(data);
+    }
+    
+    // Auto increment / ID builder
+    const newId = `WS-${Date.now().toString().slice(-6)}`;
+    const newOrder = {
+      ...order,
+      id: order.id || newId,
+      date: new Date().toISOString()
+    };
+    
+    orders.unshift(newOrder);
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+    
+    // Also, update popularity metrics & deduct stock for the items purchased!
+    try {
+      if (fs.existsSync(CATALOG_FILE)) {
+        const catData = fs.readFileSync(CATALOG_FILE, "utf-8");
+        const catalog = JSON.parse(catData);
+        order.items.forEach((item: any) => {
+          const match = catalog.find((jk: any) => jk.id === item.kitId);
+          if (match) {
+            match.popularity = (match.popularity || 0) + (item.quantity || 1);
+            if (match.stock && match.stock[item.size] !== undefined) {
+              match.stock[item.size] = Math.max(0, match.stock[item.size] - (item.quantity || 1));
+            }
+          }
+        });
+        fs.writeFileSync(CATALOG_FILE, JSON.stringify(catalog, null, 2), "utf-8");
+      }
+    } catch (e) {
+      console.warn("Stock deduction warning:", e);
+    }
+
+    res.json({ success: true, order: newOrder });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao registrar pedido", details: err.message });
+  }
+});
+
+app.post("/api/orders/update-status", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = getServerAdminPassword();
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+
+  try {
+    const { orderId, status } = req.body;
+    if (!orderId || !status) {
+      return res.status(400).json({ error: "Parâmetros incorretos" });
+    }
+    
+    let orders = [];
+    if (fs.existsSync(ORDERS_FILE)) {
+      const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+      orders = JSON.parse(data);
+    }
+    
+    const idx = orders.findIndex((o: any) => o.id === orderId);
+    if (idx === -1) {
+      return res.status(404).json({ error: "Pedido não localizado" });
+    }
+    
+    orders[idx].status = status;
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+    res.json({ success: true, message: "Status atualizado com sucesso!" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao atualizar status do pedido", details: err.message });
+  }
+});
+
+app.post("/api/orders/delete", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = getServerAdminPassword();
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+
+  try {
+    const { orderId } = req.body;
+    let orders = [];
+    if (fs.existsSync(ORDERS_FILE)) {
+      const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+      orders = JSON.parse(data);
+    }
+    
+    const filtered = orders.filter((o: any) => o.id !== orderId);
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(filtered, null, 2), "utf-8");
+    res.json({ success: true, message: "Pedido deletado com sucesso!" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao deletar pedido", details: err.message });
+  }
+});
+
+// 9. CLIENT INTERACTIVE REVIEWS ENDPOINTS
+app.get("/api/reviews", (req, res) => {
+  try {
+    if (fs.existsSync(REVIEWS_FILE)) {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      return res.json(JSON.parse(data));
+    }
+    return res.json([]);
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao ler avaliações", details: err.message });
+  }
+});
+
+app.post("/api/reviews", (req, res) => {
+  try {
+    const review = req.body;
+    if (!review || !review.clientName || !review.rating || !review.text) {
+      return res.status(400).json({ error: "Preencha todos os campos obrigatórios" });
+    }
+    
+    let reviews = [];
+    if (fs.existsSync(REVIEWS_FILE)) {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      reviews = JSON.parse(data);
+    }
+    
+    const newId = `rev-${Date.now()}`;
+    const newReview = {
+      id: newId,
+      jerseyId: review.jerseyId || null,
+      jerseyName: review.jerseyName || null,
+      clientName: review.clientName,
+      rating: Number(review.rating),
+      text: review.text,
+      date: new Date().toISOString().split("T")[0],
+      imageUrl: review.imageUrl || null,
+      approved: false, // Moderate by default before highlighting
+      featured: false
+    };
+    
+    reviews.unshift(newReview);
+    fs.writeFileSync(REVIEWS_FILE, JSON.stringify(reviews, null, 2), "utf-8");
+    res.json({ success: true, review: newReview, message: "Avaliação enviada para moderação da West Store!" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao enviar avaliação", details: err.message });
+  }
+});
+
+app.post("/api/reviews/moderate", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = getServerAdminPassword();
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+  
+  try {
+    const { reviewId, approved } = req.body;
+    let reviews = [];
+    if (fs.existsSync(REVIEWS_FILE)) {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      reviews = JSON.parse(data);
+    }
+    
+    const idx = reviews.findIndex((r: any) => r.id === reviewId);
+    if (idx !== -1) {
+      reviews[idx].approved = approved;
+      fs.writeFileSync(REVIEWS_FILE, JSON.stringify(reviews, null, 2), "utf-8");
+      res.json({ success: true, message: approved ? "Avaliação aprovada do cliente!" : "Avaliação desaprovada!" });
+    } else {
+      res.status(404).json({ error: "Avaliação não encontrada" });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro na moderação", details: err.message });
+  }
+});
+
+app.post("/api/reviews/feature", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = getServerAdminPassword();
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+  
+  try {
+    const { reviewId, featured } = req.body;
+    let reviews = [];
+    if (fs.existsSync(REVIEWS_FILE)) {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      reviews = JSON.parse(data);
+    }
+    
+    const idx = reviews.findIndex((r: any) => r.id === reviewId);
+    if (idx !== -1) {
+      reviews[idx].featured = featured;
+      fs.writeFileSync(REVIEWS_FILE, JSON.stringify(reviews, null, 2), "utf-8");
+      res.json({ success: true, message: featured ? "Destacada com sucesso na vitrine principal!" : "Removida dos destaques!" });
+    } else {
+      res.status(404).json({ error: "Avaliação não encontrada" });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao destacar", details: err.message });
+  }
+});
+
+app.post("/api/reviews/delete", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = getServerAdminPassword();
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+  
+  try {
+    const { reviewId } = req.body;
+    let reviews = [];
+    if (fs.existsSync(REVIEWS_FILE)) {
+      const data = fs.readFileSync(REVIEWS_FILE, "utf-8");
+      reviews = JSON.parse(data);
+    }
+    
+    const filtered = reviews.filter((r: any) => r.id !== reviewId);
+    fs.writeFileSync(REVIEWS_FILE, JSON.stringify(filtered, null, 2), "utf-8");
+    res.json({ success: true, message: "Avaliação removida com sucesso!" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao remover avaliação", details: err.message });
+  }
+});
+
+// 10. GRID TENDENCIAS FOOTBALL ENGINE - INCREMENT PRODUCT DETAIL CLICK VIEWS
+app.post("/api/catalog/view/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "ID inválido" });
+    
+    if (fs.existsSync(CATALOG_FILE)) {
+      const data = fs.readFileSync(CATALOG_FILE, "utf-8");
+      const catalog = JSON.parse(data);
+      const match = catalog.find((c: any) => c.id === id);
+      if (match) {
+        match.views = (match.views || 0) + 1;
+        fs.writeFileSync(CATALOG_FILE, JSON.stringify(catalog, null, 2), "utf-8");
+        return res.json({ success: true, views: match.views });
+      }
+    }
+    res.json({ success: false, message: "Produto não encontrado" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao computar visualização", details: err.message });
+  }
+});
+
+// 11. SECURE DATABASE PURGE ALL (RESET ENGINES)
+app.post("/api/admin/purge-all", (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin123";
+  if (adminPasswordHeader !== expectedPassword) {
+    return res.status(403).json({ error: "Não autorizado." });
+  }
+
+  try {
+    fs.writeFileSync(CATALOG_FILE, JSON.stringify([], null, 2), "utf-8");
+    fs.writeFileSync(VIP_MEMBERS_FILE, JSON.stringify([], null, 2), "utf-8");
+    fs.writeFileSync(COUPONS_FILE, JSON.stringify([], null, 2), "utf-8");
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify([], null, 2), "utf-8");
+    fs.writeFileSync(REVIEWS_FILE, JSON.stringify([], null, 2), "utf-8");
+
+    res.json({ success: true, message: "Todos os produtos foram removidos e a dashboard foi zerada com sucesso!" });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro ao zerar dados locais", details: err.message });
   }
 });
 
