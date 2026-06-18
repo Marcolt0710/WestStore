@@ -17,12 +17,32 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-const CATALOG_FILE = path.join(process.cwd(), "catalog.json");
-const CONFIG_FILE = path.join(process.cwd(), "site-config.json");
-const VIP_MEMBERS_FILE = path.join(process.cwd(), "vip-members.json");
-const COUPONS_FILE = path.join(process.cwd(), "coupons.json");
-const ORDERS_FILE = path.join(process.cwd(), "orders.json");
-const REVIEWS_FILE = path.join(process.cwd(), "reviews.json");
+const isVercel = !!process.env.VERCEL;
+const baseDir = isVercel ? "/tmp" : process.cwd();
+
+const CATALOG_FILE = path.join(baseDir, "catalog.json");
+const CONFIG_FILE = path.join(baseDir, "site-config.json");
+const VIP_MEMBERS_FILE = path.join(baseDir, "vip-members.json");
+const COUPONS_FILE = path.join(baseDir, "coupons.json");
+const ORDERS_FILE = path.join(baseDir, "orders.json");
+const REVIEWS_FILE = path.join(baseDir, "reviews.json");
+
+// If running in Vercel, copy initial seeded files from read-only project root to writable /tmp
+if (isVercel) {
+  const filesToCopy = ["catalog.json", "site-config.json", "vip-members.json", "coupons.json", "orders.json", "reviews.json"];
+  filesToCopy.forEach(file => {
+    const src = path.join(process.cwd(), file);
+    const dest = path.join("/tmp", file);
+    if (fs.existsSync(src) && !fs.existsSync(dest)) {
+      try {
+        fs.copyFileSync(src, dest);
+        console.log(`Copied ${file} to /tmp successfully for write access.`);
+      } catch (err: any) {
+        console.error(`Failed to copy ${file} to /tmp:`, err.message);
+      }
+    }
+  });
+}
 
 const DEFAULT_VIP_MEMBERS: any[] = [];
 
@@ -961,6 +981,11 @@ app.post("/api/admin/purge-all", (req, res) => {
 
 // VITE MIDDLEWARE INTERACTION FOR DEV vs PROD SERVICE
 async function mountViteMiddleware() {
+  if (process.env.VERCEL) {
+    console.log("Running in Vercel Serverless environment. Skipping Vite middleware and local listen.");
+    return;
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -985,3 +1010,5 @@ async function mountViteMiddleware() {
 mountViteMiddleware().catch(err => {
   console.error("Failed to start server", err);
 });
+
+export default app;
