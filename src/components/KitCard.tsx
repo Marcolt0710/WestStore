@@ -384,52 +384,7 @@ export default function KitCard({ kit, index = 0 }: KitCardProps) {
             </div>
           )}
 
-          {/* CUSTOMIZER EXPANDABLE FOR CUSTOM SQUAD NAMES & NUMBERS */}
-          <div className="mt-4 border-t border-borda-sutil/60 pt-3">
-            <button
-              type="button"
-              onClick={() => setShowCustomizer(!showCustomizer)}
-              className={`w-full text-center py-2 text-[10px] uppercase font-bold tracking-[1.5px] rounded border transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                showCustomizer
-                  ? 'bg-navy-principal border-vermelho-west text-vermelho-ativo'
-                  : 'bg-navy-principal/40 border-borda-sutil text-cinza-muted hover:border-cinza-muted hover:text-white'
-              }`}
-            >
-              🎨 {showCustomizer ? 'Fechar Personalização' : 'Personalizar Nome e Número (Grátis!)'}
-            </button>
 
-            {showCustomizer && (
-              <div className="mt-3 space-y-2.5 p-3 bg-navy-principal/50 rounded border border-borda-sutil">
-                <div className="grid grid-cols-12 gap-2">
-                  <div className="col-span-8">
-                    <label className="text-[9px] text-cinza-muted uppercase font-bold block mb-1">NOME DA CAMISA:</label>
-                    <input
-                      type="text"
-                      maxLength={15}
-                      placeholder="Ex: CALLERI"
-                      value={customName}
-                      onChange={(e) => setCustomName(e.target.value.toUpperCase())}
-                      className="w-full bg-navy-principal border border-borda-sutil focus:border-vermelho-west text-white text-xs py-1.5 px-2.5 rounded outline-none font-display uppercase tracking-wider"
-                    />
-                  </div>
-                  <div className="col-span-4">
-                    <label className="text-[9px] text-cinza-muted uppercase font-bold block mb-1">NÚMERO:</label>
-                    <input
-                      type="text"
-                      maxLength={3}
-                      placeholder="Ex: 9"
-                      value={customNumber}
-                      onChange={(e) => setCustomNumber(e.target.value.replace(/\D/g, ''))}
-                      className="w-full bg-navy-principal border border-borda-sutil focus:border-vermelho-west text-white text-xs py-1.5 px-2 rounded outline-none text-center font-display"
-                    />
-                  </div>
-                </div>
-                <span className="text-[9px] leading-tight text-cinza-muted block">
-                  🛡️ Adicionamos os patchs oficiais da liga correspondente nas mangas do seu manto!
-                </span>
-              </div>
-            )}
-          </div>
 
         </div>
 
